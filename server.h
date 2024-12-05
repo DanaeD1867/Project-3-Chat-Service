@@ -28,9 +28,14 @@
 #define MAXBUFF   2096
 #define BACKLOG 2 
 
+struct room{
+  char roomName[50]; 
+  struct room *next; 
+};
+
+struct node *users;
 
 // prototypes
-
 int get_server_socket();
 int start_server(int serv_socket, int backlog);
 int accept_client(int serv_sock);

@@ -5,6 +5,9 @@ int chat_serv_sock_fd; //server socket
 /////////////////////////////////////////////
 // USE THESE LOCKS AND COUNTER TO SYNCHRONIZE
 
+struct node *head = NULL;
+struct room *rooms = NULL;
+
 int numReaders = 0; // keep count of the number of readers
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;  // mutex lock
@@ -15,25 +18,28 @@ pthread_mutex_t rw_lock = PTHREAD_MUTEX_INITIALIZER;  // read/write lock
 
 char const *server_MOTD = "Thanks for connecting to the BisonChat Server.\n\nchat>";
 
-struct node *head = NULL;
 
 int main(int argc, char **argv) {
 
    signal(SIGINT, sigintHandler);
-    
-   //////////////////////////////////////////////////////
-   // create the default room for all clients to join when 
-   // initially connecting
-   //  
-   //    TODO
-   //////////////////////////////////////////////////////
+  
+   // create the default room for all clients to join when initially connecting
+  
+  pthread_mutex_lock(&rw_lock);
+  if(rooms == NULL){
+    rooms = malloc(sizeof(struct room)); 
+    strcpy(rooms->roomName, "Lobby");
+    rooms->next = NULL; 
+    printf("Default room 'Lobby' created.\n"); 
+  }
+  pthread_mutex_unlock(&rw_lock); 
 
    // Open server socket
    chat_serv_sock_fd = get_server_socket();
 
    // step 3: get ready to accept connections
    if(start_server(chat_serv_sock_fd, BACKLOG) == -1) {
-      printf("start server error\n");
+      printf("Start server error\n");
       exit(1);
    }
    
@@ -45,7 +51,8 @@ int main(int argc, char **argv) {
       int new_client = accept_client(chat_serv_sock_fd);
       if(new_client != -1) {
          pthread_t new_client_thread;
-         pthread_create(&new_client_thread, NULL, client_receive, (void *)&new_client);
+         pthread_create(&new_client_thread, NULL, (void *)client_receive, (void *)&new_client);
+         pthread_detach(new_client_thread); 
       }
    }
 
@@ -117,13 +124,24 @@ int accept_client(int serv_sock) {
 
 /* Handle SIGINT (CTRL+C) */
 void sigintHandler(int sig_num) {
-   printf("Error:Forced Exit.\n");
+   printf("Shutting down server...");
 
-   //////////////////////////////////////////////////////////
-   //Closing client sockets and freeing memory from user list
-   //
-   //       TODO
-   //////////////////////////////////////////////////////////
+   //Closing client sockets and freeing memory from user list 
+   pthread_mutex_lock(&rw_lock); 
+   struct node *current = users;
+   while(current){
+    struct node *temp = current;
+    current = current->next; 
+    close(temp->socket); 
+    free(temp); 
+  } 
+  
+  while(rooms != NULL){
+   struct room *temp = rooms; 
+   rooms = rooms->next; 
+   free(temp); 
+  }
+  pthread_mutex_unlock(&rw_lock); 
 
    printf("--------CLOSING ACTIVE USERS--------\n");
 

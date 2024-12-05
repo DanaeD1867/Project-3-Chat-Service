@@ -1,4 +1,5 @@
 #include "server.h"
+#include "list.h"
 
 #define DEFAULT_ROOM "Lobby"
 
@@ -8,8 +9,22 @@ extern pthread_mutex_t rw_lock;
 extern pthread_mutex_t mutex;
 
 extern struct node *head;
-
+extern struct room *rooms; 
 extern char *server_MOTD;
+
+//Helper functions for chat room commands
+struct node *removeUser(struct node *head, int socket);  
+struct node *findUserBySocket(struct node *head, int socket); 
+void broadcastMessage(const char *roomName, int senderSocket, const char *message); 
+void handleCreateRoom(char *roomName, char *buffer, int client); 
+void handleJoinRoom(char *roomName, int client, char *buffer); 
+void handleListRooms(char *buffer, int client); 
+void handleListUsers(char *buffer, int client); 
+void handleLeaveRoom(int client, char *roomName); 
+void handleConnect(int client, char *targetUser); 
+void handleDisconnect(int client, char *targetUser); 
+void handleLogin(int client, char *username); 
+void *insertRoom(const char *roomName); 
 
 
 /*
@@ -55,7 +70,9 @@ void *client_receive(void *ptr) {
    // Creating the guest user name
   
    sprintf(username,"guest%d", client);
-   head = insertFirstU(head, client , username);
+   pthread_mutex_lock(&rw_lock); 
+   head = insertFirstU(head,client ,username);
+   pthread_mutex_unlock(&rw_lock);
    
    // Add the GUEST to the DEFAULT ROOM (i.e. Lobby)
 
@@ -93,76 +110,40 @@ void *client_receive(void *ptr) {
 
             if(strcmp(arguments[0], "create") == 0)
             {
-               printf("create room: %s\n", arguments[1]); 
-              
-               // perform the operations to create room arg[1]
-              
-              
-               sprintf(buffer, "\nchat>");
-               send(client , buffer , strlen(buffer) , 0 ); // send back to client
+              handleCreateRoom(arguments[1], buffer, client); 
             }
             else if (strcmp(arguments[0], "join") == 0)
             {
-               printf("join room: %s\n", arguments[1]);  
-
-               // perform the operations to join room arg[1]
-              
-               sprintf(buffer, "\nchat>");
-               send(client , buffer , strlen(buffer) , 0 ); // send back to client
+               handleJoinRoom(arguments[1], client, buffer); 
             }
             else if (strcmp(arguments[0], "leave") == 0)
             {
-               printf("leave room: %s\n", arguments[1]); 
-
-               // perform the operations to leave room arg[1]
-
-               sprintf(buffer, "\nchat>");
-               send(client , buffer , strlen(buffer) , 0 ); // send back to client
+              handleLeaveRoom(client, arguments[1]); 
             } 
             else if (strcmp(arguments[0], "connect") == 0)
             {
-               printf("connect to user: %s \n", arguments[1]);
 
                // perform the operations to connect user with socket = client from arg[1]
+                handleConnect(client, arguments[1]);
 
-               sprintf(buffer, "\nchat>");
-               send(client , buffer , strlen(buffer) , 0 ); // send back to client
             }
             else if (strcmp(arguments[0], "disconnect") == 0)
             {             
-               printf("disconnect from user: %s\n", arguments[1]);
-               
                // perform the operations to disconnect user with socket = client from arg[1]
-                
-               sprintf(buffer, "\nchat>");
-               send(client , buffer , strlen(buffer) , 0 ); // send back to client
+              handleDisconnect(client, arguments[1]); 
             }                  
             else if (strcmp(arguments[0], "rooms") == 0)
             {
-                printf("List all the rooms\n");
-              
-                // must add put list of users into buffer to send to client
-       
-              
-                strcat(buffer, "\nchat>");
-                send(client , buffer , strlen(buffer) , 0 ); // send back to client                            
+                handleListRooms(sbuffer,client);                             
             }   
             else if (strcmp(arguments[0], "users") == 0)
             {
-                printf("List all the users\n");
-              
-                // must add put list of users into buffer to send to client
-                
-                strcat(buffer, "\nchat>");
-                send(client , buffer , strlen(buffer) , 0 ); // send back to client
+                handleListUsers(sbuffer, client); 
             }                           
             else if (strcmp(arguments[0], "login") == 0)
             {
-                
                 //rename their guestID to username. Make sure any room or DMs have the updated username.
-                
-                sprintf(buffer, "\nchat>");
-                send(client , buffer , strlen(buffer) , 0 ); // send back to client
+                handleLogin(client, arguments[1]); 
             } 
             else if (strcmp(arguments[0], "help") == 0 )
             {
@@ -173,7 +154,11 @@ void *client_receive(void *ptr) {
             {
     
                 //Remove the initiating user from all rooms and direct connections, then close the socket descriptor.
+                pthread_mutex_lock(&rw_lock); 
+                head = removeUser(head, client);
+                pthread_mutex_unlock(&rw_lock);  
                 close(client);
+                break; 
             }                         
             else { 
                  /////////////////////////////////////////////////////////////
@@ -201,4 +186,167 @@ void *client_receive(void *ptr) {
       }
    }
    return NULL;
+}
+
+void *insertRoom(const char *roomName){
+  pthread_mutex_lock(&rw_lock); 
+  struct room *newRoom = malloc(sizeof(struct room));
+  strcpy(newRoom->roomName, roomName);  
+  newRoom->next = rooms; 
+  rooms = newRoom; 
+  pthread_mutex_unlock(&rw_lock);
+  return NULL; 
+  
+}
+
+struct room *findRoom(struct room * rooms, const char *roomName){
+  pthread_mutex_lock(&rw_lock);
+  struct room *current = rooms; 
+  while(current != NULL){
+    if(strcmp(current->roomName, roomName) == 0){
+      return current; 
+    }
+    current = current->next;
+  }
+  pthread_mutex_unlock(&rw_lock);
+  return NULL; 
+}
+
+struct node *removeUser(struct node *head, int socket){
+  pthread_mutex_lock(&rw_lock);
+  struct node *current = head; 
+  struct node *prev = NULL; 
+
+  while(current != NULL){
+    if(current->socket == socket){
+      if(prev==NULL){
+        head = current->next; 
+      }else{
+        prev->next = current->next; 
+      }
+      free(current);
+      pthread_mutex_unlock(&rw_lock);
+      return head; 
+    }
+  }
+  pthread_mutex_unlock(&rw_lock);
+  return NULL; 
+}
+
+void broadcastMessage(const char *roomName, int senderSocket, const char *message){
+  pthread_mutex_lock(&rw_lock);
+  struct node *current = head; 
+  while(current != NULL){
+    if(strcmp(current->currentRoom, roomName) == 0 && current->socket != senderSocket && message){
+      pthread_mutex_unlock(&rw_lock);
+      send(current->socket, message, strlen(message), 0); 
+    }
+    current = current->next; 
+  }
+  pthread_mutex_unlock(&rw_lock);
+}
+
+void handleCreateRoom(char *roomName, char *buffer, int client){
+  pthread_mutex_lock(&rw_lock);
+  if(findRoom(rooms, roomName) != NULL){
+    sprintf(buffer, "Room '%s' already exist. \nchat>", roomName); 
+  } else{
+    insertRoom(roomName); 
+    sprintf(buffer, "Room '%s' created successfully.\nchat>", roomName); 
+  }
+  pthread_mutex_unlock(&rw_lock); 
+  send(client, buffer, strlen(buffer), 0); 
+}
+
+void handleJoinRoom(char *roomName, int client, char *buffer){
+  pthread_mutex_lock(&rw_lock);
+  struct room *room = findRoom(rooms, roomName); 
+  struct node *user = findUserBySocket(head, client); 
+
+  if(room == NULL){
+    sprintf(buffer, "Room '%s' does not exist.\nchat>", roomName); 
+  }else{
+    strcpy(user->currentRoom, roomName); 
+    sprintf(buffer, "You joined the room '%s'.\nchat>", roomName); 
+  }
+  pthread_mutex_unlock(&rw_lock); 
+  send(client,buffer,strlen(buffer),0); 
+}
+
+void handleListRooms(char *buffer, int client){
+  pthread_mutex_lock(&rw_lock); 
+  struct room *current = rooms; 
+  strcpy(buffer, "Available rooms: \n"); 
+
+  while(current != NULL){
+    strcat(buffer, current->roomName); 
+    strcat(buffer, "\n");
+    current = current->next;  
+  }
+
+  strcat(buffer, "chat>");
+  pthread_mutex_unlock(&rw_lock); 
+  send(client, buffer, strlen(buffer), 0); 
+}
+
+void handleListUsers(char *buffer, int client){
+  pthread_mutex_lock(&rw_lock);
+  struct node *current = head; 
+  strcpy(buffer, "Connected users:\n"); 
+
+  while(current != NULL){
+    strcat(buffer, current->username); 
+    strcat(buffer, "(");  
+    strcat(buffer, current->currentRoom); 
+    strcat(buffer, ")\n"); 
+    current = current->next; 
+  } 
+
+  strcat(buffer, "chat>");
+  pthread_mutex_unlock(&rw_lock); 
+  send(client, buffer, strlen(buffer), 0); 
+}
+
+void handleLeaveRoom(int client, char *roomName){
+  pthread_mutex_lock(&rw_lock);
+  char buffer[MAXBUFF]; 
+  sprintf(buffer, "Left room %s.\nchat>", roomName);
+  pthread_mutex_unlock(&rw_lock); 
+  send(client, buffer, strlen(buffer), 0);  
+}
+
+void handleLogin(int client, char *roomName){
+  pthread_mutex_lock(&rw_lock); 
+  char buffer[MAXBUFF]; 
+  sprintf(buffer, "Joined room %s.\nchat>", roomName);
+  pthread_mutex_unlock(&rw_lock);
+  send(client, buffer, strlen(buffer), 0);  
+}
+
+void handleConnect(int client, char *targetUser){
+  pthread_mutex_lock(&rw_lock);
+  char buffer[MAXBUFF]; 
+  sprintf(buffer, "Connected to %s.\nchat>", targetUser); 
+  pthread_mutex_unlock(&rw_lock); 
+  send(client, buffer, strlen(buffer), 0); 
+}
+
+void handleDisconnect(int client, char *targetUser){
+  pthread_mutex_lock(&rw_lock);  
+
+  char buffer[MAXBUFF]; 
+  sprintf(buffer, "Disconnected from %s.\nchat>", targetUser);
+  pthread_mutex_unlock(&rw_lock); 
+  send(client, buffer, strlen(buffer), 0); 
+}
+
+struct node *findUserBySocket(struct node *head, int socket){
+  struct node *current = head; 
+  while(current != NULL){
+    if(current->socket == socket){
+      return current; 
+    }
+    current = current->next; 
+  }
+  return NULL; 
 }
