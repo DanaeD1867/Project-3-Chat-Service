@@ -246,9 +246,8 @@ void broadcastMessage(const char *roomName, int senderSocket, const char *messag
 }
 
 void handleCreateRoom(char *roomName, char *buffer, int client){
-  printf("Attemptig to create room"); 
+  printf("Attemptig to create room\n"); 
   pthread_mutex_lock(&rw_lock);
-  printf("Lock created");
 
   struct room *foundRoom = findRoom(rooms, roomName); 
   if(foundRoom != NULL){
@@ -263,14 +262,7 @@ void handleCreateRoom(char *roomName, char *buffer, int client){
     }
   }
 
-  printf("Rooms after creation attempt:\n");
-  struct room *current = rooms; 
-  while(current){
-    printf("Room: %s", current->roomName);
-    current = current->next; 
-  }
   pthread_mutex_unlock(&rw_lock); 
-  printf("Lock released after room creation"); 
 
   buffer[MAXBUFF -1] = '\0';
   
