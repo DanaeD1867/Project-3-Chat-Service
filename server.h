@@ -31,6 +31,7 @@
 struct room{
   char roomName[50]; 
   struct room *next; 
+  struct struct node *userList;
 };
 
 struct node *users;

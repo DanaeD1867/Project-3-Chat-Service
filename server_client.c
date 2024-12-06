@@ -1,5 +1,6 @@
 #include "server.h"
 #include "list.h"
+#include <stdint.h>
 
 #define DEFAULT_ROOM "Lobby"
 
@@ -24,7 +25,7 @@ void handleLeaveRoom(int client, char *roomName);
 void handleConnect(int client, char *targetUser); 
 void handleDisconnect(int client, char *targetUser); 
 void handleLogin(int client, char *username); 
-void *insertRoom(const char *roomName); 
+int insertRoom(const char *roomName); 
 
 
 /*
@@ -188,19 +189,18 @@ void *client_receive(void *ptr) {
    return NULL;
 }
 
-void *insertRoom(const char *roomName){
-  pthread_mutex_lock(&rw_lock); 
+int insertRoom(const char *roomName){
+  
   struct room *newRoom = malloc(sizeof(struct room));
+  
   strcpy(newRoom->roomName, roomName);  
   newRoom->next = rooms; 
+  newRoom->userList = NULL; 
   rooms = newRoom; 
-  pthread_mutex_unlock(&rw_lock);
-  return NULL; 
-  
+  return 1; 
 }
 
-struct room *findRoom(struct room * rooms, const char *roomName){
-  pthread_mutex_lock(&rw_lock);
+struct room *findRoom(struct room *rooms, const char *roomName){
   struct room *current = rooms; 
   while(current != NULL){
     if(strcmp(current->roomName, roomName) == 0){
@@ -208,7 +208,6 @@ struct room *findRoom(struct room * rooms, const char *roomName){
     }
     current = current->next;
   }
-  pthread_mutex_unlock(&rw_lock);
   return NULL; 
 }
 
@@ -247,15 +246,41 @@ void broadcastMessage(const char *roomName, int senderSocket, const char *messag
 }
 
 void handleCreateRoom(char *roomName, char *buffer, int client){
+  printf("Attemptig to create room"); 
   pthread_mutex_lock(&rw_lock);
-  if(findRoom(rooms, roomName) != NULL){
+  printf("Lock created");
+
+  struct room *foundRoom = findRoom(rooms, roomName); 
+  if(foundRoom != NULL){
+    printf("Room %s already exists.\n", roomName); 
     sprintf(buffer, "Room '%s' already exist. \nchat>", roomName); 
   } else{
-    insertRoom(roomName); 
-    sprintf(buffer, "Room '%s' created successfully.\nchat>", roomName); 
+    printf("Room %s not found. Creating...\n", roomName); 
+    if(insertRoom(roomName)){
+      sprintf(buffer, "Room '%s' created successfully.\nchat>", roomName); 
+    }else{
+      sprintf(buffer, "Error: Failed to create room '%s'\nchat>", roomName); 
+    }
+  }
+
+  printf("Rooms after creation attempt:\n");
+  struct room *current = rooms; 
+  while(current){
+    printf("Room: %s", current->roomName);
+    current = current->next; 
   }
   pthread_mutex_unlock(&rw_lock); 
-  send(client, buffer, strlen(buffer), 0); 
+  printf("Lock released after room creation"); 
+
+  buffer[MAXBUFF -1] = '\0';
+  
+  int bytesSent = send(client, buffer, strlen(buffer), 0); 
+
+  if(bytesSent < 0){
+    perror("Send failed"); 
+  }else{
+    printf("Sent response to client: %s\n", buffer); 
+  }
 }
 
 void handleJoinRoom(char *roomName, int client, char *buffer){
@@ -315,12 +340,48 @@ void handleLeaveRoom(int client, char *roomName){
   send(client, buffer, strlen(buffer), 0);  
 }
 
-void handleLogin(int client, char *roomName){
+void updateRoomUser(struct room *room, int client, char *newUsername){
+  struct node *roomUser = room->userList; 
+  while(roomUser != NULL){
+    if(roomUser->socket == client){
+      strcpy(roomUser->username, newUsername); 
+      break; 
+    }
+    roomUser = roomUser->next; 
+  }
+
+}
+
+void handleLogin(int client, char *newUsername){
   pthread_mutex_lock(&rw_lock); 
-  char buffer[MAXBUFF]; 
-  sprintf(buffer, "Joined room %s.\nchat>", roomName);
+  struct node *current = findUserBySocket(head, client);
+
+  if(current == NULL){
+    pthread_mutex_unlock(&rw_lock); 
+    char errorMsg[MAXBUFF] = "Error: Unable to find user.\nchat>";
+    send(client, errorMsg, strlen(errorMsg), 0); 
+    return; 
+  } 
+
+  if(findU(head, newUsername) != NULL){
+    pthread_mutex_unlock(&rw_lock); 
+    char errorMsg[MAXBUFF] = "Error: username already taken.\nchat>"; 
+    send(client, errorMsg, strlen(errorMsg), 0); 
+  }
+
+  strcpy(current->username, newUsername); 
+
+  struct room *roomPtr = rooms; 
+  while(roomPtr != NULL){
+    updateRoomUser(roomPtr, client, newUsername); 
+    roomPtr = roomPtr->next; 
+  }
+
+  char successMsg[MAXBUFF]; 
+  sprintf(successMsg, "Welcome, %s! Your username has been updated.\nchat>", newUsername); 
   pthread_mutex_unlock(&rw_lock);
-  send(client, buffer, strlen(buffer), 0);  
+  send(client, successMsg, strlen(successMsg), 0); 
+
 }
 
 void handleConnect(int client, char *targetUser){
