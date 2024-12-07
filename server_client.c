@@ -2,6 +2,9 @@
 #include "list.h"
 #include <stdint.h>
 
+
+
+
 #define DEFAULT_ROOM "Lobby"
 
 // USE THESE LOCKS AND COUNTER TO SYNCHRONIZE
@@ -155,11 +158,61 @@ void *client_receive(void *ptr) {
             {
     
                 //Remove the initiating user from all rooms and direct connections, then close the socket descriptor.
+                 /***
                 pthread_mutex_lock(&rw_lock); 
+                head = removeUser(head, client);
+                pthread_mutex_unlock(&rw_lock); 
+                fflush(stdout);
+                close(client);
+                printf("Client %d disconnected.\n", client);
+                exit(1); ***/
+
+                printf("Attempting to remove socket: %d\n", client);
+                struct node *current = head;
+                while (current != NULL) {
+                    printf("Existing socket: %d\n", current->socket);
+                    current = current->next;
+                }
+
+
+
+                /**pthread_mutex_lock(&rw_lock); 
                 head = removeUser(head, client);
                 pthread_mutex_unlock(&rw_lock);  
                 close(client);
                 break; 
+                **/
+
+                pthread_mutex_lock(&rw_lock);
+                printf("Starting user removal process for socket: %d\n", client);
+                current = head; 
+                struct node *prev = NULL; 
+
+                while (current != NULL) {
+                    printf("Checking socket: %d\n", current->socket);
+                    if (current->socket == client) {
+                        if (prev == NULL) {
+                            printf("Removing head node.\n");
+                            head = current->next; 
+                        } else {
+                              printf("Removing middle node.\n");
+                              prev->next = current->next; 
+                          }
+                          free(current); 
+                          printf("User successfully removed\n");
+                          pthread_mutex_unlock(&rw_lock);
+                      }
+                      prev = current;
+                      current = current->next;
+                  }
+
+                  printf("Socket not found in list.\n");
+                  pthread_mutex_unlock(&rw_lock);
+                  printf("Client socket successfully closed!\n");
+                  fflush(stdout); 
+                  close(client);
+                  break; 
+                  
             }                         
             else { 
                  /////////////////////////////////////////////////////////////
@@ -168,9 +221,20 @@ void *client_receive(void *ptr) {
                  // send a message in the following format followed by the promt chat> to the appropriate receipients based on rooms, DMs
                  // ::[userfrom]> <message>
               
-                 sprintf(tmpbuf,"\n::%s> %s\nchat>", "PUTUSERFROM", sbuffer);
+                 
+                char senderUsername[50] = "Unknown"; 
+                 currentUser = head;
+                 while(currentUser != NULL){
+                  if(client == currentUser->socket){
+                    strcpy(senderUsername, currentUser->username); 
+                    break; 
+                  }
+                  currentUser = currentUser->next; 
+                 }
+
+                 sprintf(tmpbuf,"\n::%s> %s\nchat>", senderUsername, sbuffer);
                  strcpy(sbuffer, tmpbuf);
-                       
+
                  currentUser = head;
                  while(currentUser != NULL) {
                      
@@ -211,26 +275,37 @@ struct room *findRoom(struct room *rooms, const char *roomName){
   return NULL; 
 }
 
-struct node *removeUser(struct node *head, int socket){
-  pthread_mutex_lock(&rw_lock);
-  struct node *current = head; 
-  struct node *prev = NULL; 
+struct node *removeUser(struct node *head, int socket) {
+    pthread_mutex_lock(&rw_lock);
+    printf("Starting user removal process for socket: %d\n", socket);
+    struct node *current = head; 
+    struct node *prev = NULL; 
 
-  while(current != NULL){
-    if(current->socket == socket){
-      if(prev==NULL){
-        head = current->next; 
-      }else{
-        prev->next = current->next; 
-      }
-      free(current);
-      pthread_mutex_unlock(&rw_lock);
-      return head; 
+    while (current != NULL) {
+        printf("Checking socket: %d\n", current->socket);
+        if (current->socket == socket) {
+            if (prev == NULL) {
+                printf("Removing head node.\n");
+                head = current->next; 
+            } else {
+                printf("Removing middle node.\n");
+                prev->next = current->next; 
+            }
+            free(current); 
+            printf("User successfully removed\n");
+            pthread_mutex_unlock(&rw_lock);
+            return head;
+        }
+        prev = current;
+        current = current->next;
     }
-  }
-  pthread_mutex_unlock(&rw_lock);
-  return NULL; 
+
+    printf("Socket not found in list.\n");
+    pthread_mutex_unlock(&rw_lock);
+    return head;
 }
+
+
 
 void broadcastMessage(const char *roomName, int senderSocket, const char *message){
   pthread_mutex_lock(&rw_lock);
@@ -252,7 +327,7 @@ void handleCreateRoom(char *roomName, char *buffer, int client){
   struct room *foundRoom = findRoom(rooms, roomName); 
   if(foundRoom != NULL){
     printf("Room %s already exists.\n", roomName); 
-    sprintf(buffer, "Room '%s' already exist. \nchat>", roomName); 
+    sprintf(buffer, "Room '%s' already exist. \n", roomName); 
   } else{
     printf("Room %s not found. Creating...\n", roomName); 
     if(insertRoom(roomName)){
@@ -361,6 +436,7 @@ void handleLogin(int client, char *newUsername){
     send(client, errorMsg, strlen(errorMsg), 0); 
   }
 
+  char oldName = *current->username; 
   strcpy(current->username, newUsername); 
 
   struct room *roomPtr = rooms; 
@@ -371,24 +447,27 @@ void handleLogin(int client, char *newUsername){
 
   char successMsg[MAXBUFF]; 
   sprintf(successMsg, "Welcome, %s! Your username has been updated.\nchat>", newUsername); 
+  printf("Successfully updated %d's username to %s \n", oldName, newUsername);
   pthread_mutex_unlock(&rw_lock);
   send(client, successMsg, strlen(successMsg), 0); 
 
 }
 
+
 void handleConnect(int client, char *targetUser){
   pthread_mutex_lock(&rw_lock);
   char buffer[MAXBUFF]; 
   sprintf(buffer, "Connected to %s.\nchat>", targetUser); 
+  printf("Successfully connected users from %s", targetUser);
   pthread_mutex_unlock(&rw_lock); 
   send(client, buffer, strlen(buffer), 0); 
 }
 
 void handleDisconnect(int client, char *targetUser){
   pthread_mutex_lock(&rw_lock);  
-
   char buffer[MAXBUFF]; 
   sprintf(buffer, "Disconnected from %s.\nchat>", targetUser);
+  printf("Successfully disconnected users from %s", targetUser); 
   pthread_mutex_unlock(&rw_lock); 
   send(client, buffer, strlen(buffer), 0); 
 }
