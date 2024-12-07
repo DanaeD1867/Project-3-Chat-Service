@@ -19,6 +19,7 @@ pthread_mutex_t rw_lock = PTHREAD_MUTEX_INITIALIZER;  // read/write lock
 char const *server_MOTD = "Thanks for connecting to the BisonChat Server.\n\nchat>";
 
 
+
 int main(int argc, char **argv) {
 
    signal(SIGINT, sigintHandler);
@@ -124,7 +125,8 @@ int accept_client(int serv_sock) {
 
 /* Handle SIGINT (CTRL+C) */
 void sigintHandler(int sig_num) {
-   printf("Shutting down server...");
+   printf("Shutting down server...\n");
+   fflush(stdout); 
 
    //Closing client sockets and freeing memory from user list 
    pthread_mutex_lock(&rw_lock); 
@@ -132,6 +134,7 @@ void sigintHandler(int sig_num) {
    while(current){
     struct node *temp = current;
     current = current->next; 
+    send(temp->socket, "Server is Shutting down...\n", 27, 0); 
     close(temp->socket); 
     free(temp); 
   } 
@@ -146,5 +149,7 @@ void sigintHandler(int sig_num) {
    printf("--------CLOSING ACTIVE USERS--------\n");
 
    close(chat_serv_sock_fd);
+   printf("Server successfully shut down.\n");
+   fflush(stdout);  
    exit(0);
 }

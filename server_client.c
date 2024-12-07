@@ -1,8 +1,13 @@
+
 #include "server.h"
 #include "list.h"
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
-
+/***
+Authors: Danae Dunlap, Khandie Anijah-Obi, Le'ale Addis
+***/
 
 
 #define DEFAULT_ROOM "Lobby"
@@ -157,31 +162,7 @@ void *client_receive(void *ptr) {
             else if (strcmp(arguments[0], "exit") == 0 || strcmp(arguments[0], "logout") == 0)
             {
     
-                //Remove the initiating user from all rooms and direct connections, then close the socket descriptor.
-                 /***
-                pthread_mutex_lock(&rw_lock); 
-                head = removeUser(head, client);
-                pthread_mutex_unlock(&rw_lock); 
-                fflush(stdout);
-                close(client);
-                printf("Client %d disconnected.\n", client);
-                exit(1); ***/
-
-                printf("Attempting to remove socket: %d\n", client);
-                struct node *current = head;
-                while (current != NULL) {
-                    printf("Existing socket: %d\n", current->socket);
-                    current = current->next;
-                }
-
-
-
-                /**pthread_mutex_lock(&rw_lock); 
-                head = removeUser(head, client);
-                pthread_mutex_unlock(&rw_lock);  
-                close(client);
-                break; 
-                **/
+             //Remove the initiating user from all rooms and direct connections, then close the socket descriptor.
 
                 pthread_mutex_lock(&rw_lock);
                 printf("Starting user removal process for socket: %d\n", client);
@@ -220,7 +201,7 @@ void *client_receive(void *ptr) {
            
                  // send a message in the following format followed by the promt chat> to the appropriate receipients based on rooms, DMs
                  // ::[userfrom]> <message>
-              
+            
                  
                 char senderUsername[50] = "Unknown"; 
                  currentUser = head;
