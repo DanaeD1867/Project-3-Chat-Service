@@ -10,6 +10,11 @@ struct node {
    int socket;
    char currentRoom[50];
    struct node *next;
+
+   //For connections
+   struct node **connectedUsers;  
+   int connectedCount;           
+   int connectedCapacity; 
 };
 
 /////////////////// USERLIST //////////////////////////
@@ -19,5 +24,7 @@ struct node* insertFirstU(struct node *head, int socket, char *username);
 
 //find a node with given username
 struct node* findU(struct node *head, char* username);
+void addConnection(struct node *user, struct node *newConnection); 
+void removeConnection(struct node *user, struct node *connectionToRemove); 
  
 #endif // LIST_H

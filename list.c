@@ -53,3 +53,27 @@ struct node* findU(struct node *head, char* username) {
    //if username found, return the current Link
    return current;
 }
+
+void addConnection(struct node *user, struct node *newConnection) {
+    if (user->connectedCount == user->connectedCapacity) {
+        // Resize the array if capacity is reached
+        user->connectedCapacity *= 2;
+        user->connectedUsers = realloc(user->connectedUsers, user->connectedCapacity * sizeof(struct node *));
+    }
+    user->connectedUsers[user->connectedCount++] = newConnection;
+}
+
+void removeConnection(struct node *user, struct node *connectionToRemove) {
+    for (int i = 0; i < user->connectedCount; i++) {
+        if (user->connectedUsers[i] == connectionToRemove) {
+            // Shift remaining connections to fill the gap
+            for (int j = i; j < user->connectedCount - 1; j++) {
+                user->connectedUsers[j] = user->connectedUsers[j + 1];
+            }
+            user->connectedCount--;
+            break;
+        }
+    }
+}
+
+
