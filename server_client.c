@@ -233,7 +233,9 @@ void *client_receive(void *ptr) {
                   }
 
                   msgArgs->socket = connectedUsers->socket; 
-                  strcpy(msgArgs->message, sbuffer); 
+                  strcpy(msgArgs->message, sbuffer);
+                  strcpy(buffer, "\nchat>");
+                  send(client, buffer, strlen(buffer), 0); 
                       
                        
                   // Create a thread for sending the message
@@ -241,7 +243,6 @@ void *client_receive(void *ptr) {
                           perror("Failed to create thread for message sending");
                           free(msgArgs);
                       }else{
-
                         pthread_detach(sendThread);
                       }
                       
@@ -256,13 +257,12 @@ void *client_receive(void *ptr) {
 }
 
 int insertRoom(const char *roomName){
-  
   struct room *newRoom = malloc(sizeof(struct room));
-  
   strcpy(newRoom->roomName, roomName);  
   newRoom->next = rooms; 
   newRoom->userList = NULL; 
   rooms = newRoom; 
+  printf("Successfully inserted room %s into rooms linked list.\n", newRoom->roomName);
   return 1; 
 }
 
@@ -270,10 +270,12 @@ struct room *findRoom(struct room *rooms, const char *roomName){
   struct room *current = rooms; 
   while(current != NULL){
     if(strcmp(current->roomName, roomName) == 0){
+      printf("Found room %s\n", current->roomName); 
       return current; 
     }
     current = current->next;
   }
+  printf("Couldn't find room %s\n", roomName); 
   return NULL; 
 }
 
@@ -289,23 +291,13 @@ void handleCreateRoom(char *roomName, char *buffer, int client){
   } else{
     printf("Room %s not found. Creating...\n", roomName); 
     if(insertRoom(roomName)){
-      sprintf(buffer, "Room '%s' created successfully.\nchat>", roomName); 
+      sprintf(buffer, "Room '%s' created successfully\nchat>", roomName); 
     }else{
       sprintf(buffer, "Error: Failed to create room '%s'\nchat>", roomName); 
     }
   }
 
   pthread_mutex_unlock(&rw_lock); 
-
-  buffer[MAXBUFF -1] = '\0';
-  
-  int bytesSent = send(client, buffer, strlen(buffer), 0); 
-
-  if(bytesSent < 0){
-    perror("Send failed"); 
-  }else{
-    printf("Sent response to client: %s\n", buffer); 
-  }
 }
 
 void handleJoinRoom(char *roomName, int client, char *buffer){
@@ -315,12 +307,54 @@ void handleJoinRoom(char *roomName, int client, char *buffer){
 
   if(room == NULL){
     sprintf(buffer, "Room '%s' does not exist.\nchat>", roomName); 
+    printf("Couldn't find room '%s'\n", roomName); 
   }else{
-    strcpy(user->currentRoom, roomName); 
+    if(user->roomCount == user->roomCapacity){
+      user->roomCapacity = (user->roomCapacity == 0) ? 2: user->roomCapacity * 2; 
+      user->rooms = realloc(user->rooms, user->roomCapacity * sizeof(char *)); 
+      if(!user->rooms){
+        perror("Failed to allocate memory for rooms"); 
+        pthread_mutex_unlock(&rw_lock); 
+        return; 
+      }
+    }
+    user->rooms[user->roomCount] = strdup(roomName); 
+    user->roomCount++; 
     sprintf(buffer, "You joined the room '%s'.\nchat>", roomName); 
+    printf("Successfully joined user '%s' to room '%s'\n", user->username, roomName);
   }
   pthread_mutex_unlock(&rw_lock); 
   send(client,buffer,strlen(buffer),0); 
+}
+
+void handleLeaveRoom(int client, char *roomName){
+  pthread_mutex_lock(&rw_lock);
+  struct node *user = findUserBySocket(head, client); 
+  char buffer[MAXBUFF]; 
+  sprintf(buffer, "Left room %s.\nchat>", roomName);
+  int found = 0;
+  int i; 
+  for(i = 0; i < user->roomCount; i++) {
+      if (strcmp(user->rooms[i], roomName) == 0) {
+          free(user->rooms[i]);
+          for (int j = i; j < user->roomCount - 1; j++) {
+          user->rooms[j] = user->rooms[j + 1];
+          }
+        user->roomCount--;
+        found = 1; 
+        break;
+    }
+  }
+
+  if (found) {
+    sprintf(buffer, "You have successfully left the room '%s'.\nchat>", roomName);
+    printf("User '%s' left the room '%s'\n", user->username, roomName);
+  } else {
+    sprintf(buffer, "You are not in the room '%s'.\nchat>", roomName);
+    printf("User '%s' tried to leave a non-joined room '%s'\n", user->username, roomName);
+  }
+  pthread_mutex_unlock(&rw_lock); 
+  send(client, buffer, strlen(buffer), 0);  
 }
 
 void handleListRooms(char *buffer, int client){
@@ -342,21 +376,36 @@ void handleListRooms(char *buffer, int client){
 void *sendMessage(void *args){
   struct MessageArgs *msgArgs = (struct MessageArgs *)args;
   send(msgArgs->socket, msgArgs->message, strlen(msgArgs->message), 0);
-  free(msgArgs); 
+  free(msgArgs);  
   return NULL; 
 }
 
 void handleListUsers(char *buffer, int client){
   pthread_mutex_lock(&rw_lock);
   struct node *current = head; 
-  strcpy(buffer, "Connected users:\n"); 
+  struct node *currentUser = head;
 
   while(current != NULL){
-    strcat(buffer, current->username); 
-    strcat(buffer, "(");  
-    strcat(buffer, current->currentRoom); 
-    strcat(buffer, ")\n"); 
+    if(current->socket == client){
+      currentUser = current; 
+      break; 
+    }
     current = current->next; 
+  } 
+
+  if(currentUser == NULL){
+    strcpy(buffer, "Error: User not found.\nchat>"); 
+    pthread_mutex_unlock(&rw_lock); 
+    send(client, buffer, strlen(buffer), 0); 
+    return; 
+  }
+
+  strcpy(buffer, "Connected users:\n"); 
+  int i; 
+  for(i = 0; i < currentUser->connectedCount; i++){
+    struct node *connectedUser = currentUser->connectedUsers[i]; 
+    strcat(buffer, connectedUser->username); 
+    strcat(buffer, "\n");  
   } 
 
   strcat(buffer, "chat>");
@@ -364,13 +413,7 @@ void handleListUsers(char *buffer, int client){
   send(client, buffer, strlen(buffer), 0); 
 }
 
-void handleLeaveRoom(int client, char *roomName){
-  pthread_mutex_lock(&rw_lock);
-  char buffer[MAXBUFF]; 
-  sprintf(buffer, "Left room %s.\nchat>", roomName);
-  pthread_mutex_unlock(&rw_lock); 
-  send(client, buffer, strlen(buffer), 0);  
-}
+
 
 void updateRoomUser(struct room *room, int client, char *newUsername){
   struct node *roomUser = room->userList; 

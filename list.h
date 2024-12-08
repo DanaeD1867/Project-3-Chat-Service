@@ -8,7 +8,11 @@
 struct node {
    char username[50];
    int socket;
-   char currentRoom[50];
+
+   char **rooms;
+   int roomCount; 
+   int roomCapacity; 
+   
    struct node *next;
 
    //For connections

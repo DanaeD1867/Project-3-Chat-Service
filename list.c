@@ -75,5 +75,3 @@ void removeConnection(struct node *user, struct node *connectionToRemove) {
         }
     }
 }
-
-
